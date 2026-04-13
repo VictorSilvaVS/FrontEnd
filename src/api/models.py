@@ -2,7 +2,6 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
-# Modelo para os dados brutos lidos do PLC
 class MachineDataRaw(BaseModel):
     machine_name: str
     ign_status: Optional[int] = None
@@ -10,7 +9,6 @@ class MachineDataRaw(BaseModel):
     machine_state: Optional[int] = None
     timestamp: Optional[datetime] = Field(default_factory=datetime.now)
 
-# Modelo para dados calculados armazenados no DB
 class MachineDataDB(BaseModel):
     id: int
     timestamp: datetime
@@ -21,7 +19,6 @@ class MachineDataDB(BaseModel):
     total_run_time_seconds: int
     standby_time_seconds: int
 
-# Modelo para os resultados de eficiência
 class EfficiencyMetrics(BaseModel):
     machine_name: str
     period_start: str
@@ -43,13 +40,11 @@ class EfficiencyMetrics(BaseModel):
     average_operating_speed_value: float
     recorded_standby_codes: List[int]
 
-# Modelo para configuração de máquina (para gerenciamento via API)
 class MachineConfig(BaseModel):
     name: str
     ip_address: str
     protocol: str = "ethernetip"
-    tags: dict # Ex: {"ign_status": "Tag_IGN_Status_A", ...}
+    tags: dict
 
-# Modelo para a configuração geral do PLC
 class PlcConfig(BaseModel):
     machines: List[MachineConfig]

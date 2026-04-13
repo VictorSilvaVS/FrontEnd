@@ -20,8 +20,7 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                # Ajuste as colunas para refletir os nomes usados no mapeamento mais comum
-                # Usaremos nomes mais genéricos que são mapeados a partir do JSON
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS machine_data (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +37,6 @@ class Database:
                     )
                 ''')
 
-                # Tabela para consolidado horário (Rollup)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS hourly_data (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +55,7 @@ class Database:
             logging.info(f"Tabela 'machine_data' verificada/criada com sucesso em {self.db_path}")
         except sqlite3.Error as e:
             logging.error(f"Erro ao criar tabelas no banco de dados: {e}")
-            # Se falhar aqui, o aplicativo não poderá operar corretamente
+
             raise
 
     def insert_data_batch(self, data_list: List[Dict[str, Any]]):
@@ -69,21 +67,16 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Prepara os dados para inserção
-                # Cada item em data_list deve ser um dicionário com as chaves correspondentes à tabela
-                # O timestamp deve ser incluído ou gerado aqui
-                
+
                 records_to_insert = []
                 for data in data_list:
-                    timestamp = datetime.now(timezone.utc) # Usar UTC é uma boa prática
+                    timestamp = datetime.now(timezone.utc)
                     machine_name = data.get("machine_name")
 
                     if not machine_name:
                         logging.warning("Registro ignorado: machine_name ausente.")
                         continue
 
-                    # Garante que todos os campos da tabela tenham um valor (mesmo que None)
                     record = {
                         "timestamp": timestamp,
                         "machine_name": machine_name,
@@ -92,17 +85,16 @@ class Database:
                         "current_speed_spm": data.get("current_speed_spm"),
                         "max_sp": data.get("max_sp"),
                         "min_sp": data.get("min_sp"),
-                        # Campos calculados iniciam em 0
-                        "interval_run_time_seconds": 0, 
+
+                        "interval_run_time_seconds": 0,
                         "interval_standby_time_seconds": 0
                     }
                     records_to_insert.append(record)
 
-                # Executa a inserção em lote
                 cols = list(records_to_insert[0].keys())
                 placeholders = ', '.join('?' * len(cols))
                 sql = f"INSERT INTO machine_data ({', '.join(cols)}) VALUES ({placeholders})"
-                
+
                 cursor.executemany(sql, [tuple(r[col] for col in cols) for r in records_to_insert])
                 conn.commit()
                 rows_inserted = len(records_to_insert)
@@ -111,7 +103,7 @@ class Database:
             logging.warning("Duplicidade encontrada. Alguns registros podem não ter sido inseridos.")
         except sqlite3.Error as e:
             logging.error(f"Erro ao inserir dados no banco de dados: {e}")
-            # O rollback é implícito ao sair do bloco 'with' em caso de erro
+
         return rows_inserted
 
     def get_last_record(self, machine_name: str) -> Optional[Dict[str, Any]]:
@@ -120,8 +112,8 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT * FROM machine_data 
-                    WHERE machine_name = ? 
+                    SELECT * FROM machine_data
+                    WHERE machine_name = ?
                     ORDER BY timestamp DESC LIMIT 1
                 """, (machine_name,))
                 row = cursor.fetchone()
@@ -143,7 +135,7 @@ class Database:
                 if machine_name:
                     query += " AND machine_name = ?"
                     params.append(machine_name)
-                query += " ORDER BY timestamp ASC" # Essencial para cálculos de intervalo
+                query += " ORDER BY timestamp ASC"
 
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
@@ -164,8 +156,7 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Agrupa por máquina caso a lista contenha dados de várias
+
                 machine_data_grouped: Dict[str, List[Dict[str, Any]]] = {}
                 for record in records:
                     machine = record['machine_name']
@@ -173,9 +164,8 @@ class Database:
                         machine_data_grouped[machine] = []
                     machine_data_grouped[machine].append(record)
 
-                # Processa cada máquina separadamente
                 for machine, data_list in machine_data_grouped.items():
-                    # Garante que a lista esteja ordenada por timestamp
+
                     data_list.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
 
                     for i in range(len(data_list)):
@@ -185,36 +175,33 @@ class Database:
 
                         interval_run_time = 0
                         interval_standby_time = 0
-                        
-                        # Calcula a diferença com o registro anterior para obter o tempo do intervalo
+
                         if i > 0:
                             prev_record = data_list[i-1]
                             prev_timestamp = datetime.fromisoformat(prev_record['timestamp'])
                             time_diff_seconds = int((current_timestamp - prev_timestamp).total_seconds())
-                            
+
                             if time_diff_seconds > 0:
                                 interval_run_time = time_diff_seconds
-                                
-                                # Verifica se o estado *atual* é um código de standby
-                                current_status = current_record.get('status')
-                                # Precisamos dos standby_codes da configuração da máquina
-                                machine_config = self.config_manager.get_machine_config(machine) # Assumindo que config_manager é acessível
-                                if machine_config and current_status in machine_config.standby_codes:
-                                     interval_standby_time = interval_run_time # O intervalo completo foi em standby
 
-                        # Atualiza o registro no banco de dados
+                                current_status = current_record.get('status')
+
+                                machine_config = self.config_manager.get_machine_config(machine)
+                                if machine_config and current_status in machine_config.standby_codes:
+                                     interval_standby_time = interval_run_time
+
                         cursor.execute("""
                             UPDATE machine_data
                             SET interval_run_time_seconds = ?, interval_standby_time_seconds = ?
                             WHERE id = ?
                         """, (interval_run_time, interval_standby_time, current_id))
-                
+
                 conn.commit()
                 logging.info(f"Tempos de intervalo atualizados para {len(records)} registros.")
         except sqlite3.Error as e:
             logging.error(f"Erro ao atualizar tempos de intervalo: {e}")
             if conn: conn.rollback()
-        except Exception as e: # Captura erros de config_manager, etc.
+        except Exception as e:
              logging.error(f"Erro inesperado ao atualizar tempos de intervalo: {e}")
              if conn: conn.rollback()
     def insert_hourly_rollup(self, rollup_data: Dict[str, Any]):
@@ -224,7 +211,7 @@ class Database:
                 cursor = conn.cursor()
                 cols = list(rollup_data.keys())
                 placeholders = ', '.join('?' * len(cols))
-                # Usa INSERT OR REPLACE para garantir idempotência se rodar de novo
+
                 sql = f"INSERT OR REPLACE INTO hourly_data ({', '.join(cols)}) VALUES ({placeholders})"
                 cursor.execute(sql, tuple(rollup_data[col] for col in cols))
                 conn.commit()
@@ -237,7 +224,7 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT * FROM hourly_data 
+                    SELECT * FROM hourly_data
                     WHERE machine_name = ? AND hour_timestamp BETWEEN ? AND ?
                     ORDER BY hour_timestamp ASC
                 """, (machine_name, start_time.isoformat(), end_time.isoformat()))

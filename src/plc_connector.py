@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class PLCConnector:
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.connections: Dict[str, LogixDriver] = {} # Armazena conexões ativas {machine_name: driver}
+        self.connections: Dict[str, LogixDriver] = {}
 
     def _get_machine_config(self, machine_name: str) -> Optional[MachineConfigModel]:
         return self.config_manager.get_machine_config(machine_name)
@@ -18,7 +18,7 @@ class PLCConnector:
     def connect(self, machine_name: str) -> Optional[LogixDriver]:
         """Estabelece ou retorna uma conexão ativa para a máquina especificada."""
         if machine_name in self.connections and self.connections[machine_name].connected:
-            # logging.debug(f"Conexão com {machine_name} já está ativa.")
+
             return self.connections[machine_name]
 
         machine_config = self._get_machine_config(machine_name)
@@ -28,13 +28,13 @@ class PLCConnector:
 
         ip = machine_config.ip_address
         slot = machine_config.processor_slot
-        
+
         try:
             logging.info(f"Tentando conectar à máquina {machine_name} ({ip}:{slot})...")
-            # LogixDriver é o driver para Allen-Bradley CompactLogix/ControlLogix
-            driver = LogixDriver(ip, processor_slot=slot) 
+
+            driver = LogixDriver(ip, processor_slot=slot)
             driver.open()
-            
+
             if driver.connected:
                 logging.info(f"Conectado com sucesso à máquina {machine_name} ({ip}:{slot}).")
                 self.connections[machine_name] = driver
@@ -57,7 +57,7 @@ class PLCConnector:
         if not plc_tag_name:
             logging.warning(f"Tag key '{tag_key}' não encontrada no mapeamento da máquina {machine_name}.")
             return None
-        
+
         driver = self.connections.get(machine_name)
         if not driver or not driver.connected:
             logging.warning(f"Conexão com {machine_name} não está ativa. Tentando reconectar...")
@@ -65,23 +65,19 @@ class PLCConnector:
             if not driver or not driver.connected:
                 logging.error(f"Não foi possível conectar ou reconectar à máquina {machine_name}.")
                 return None
-        
+
         try:
-            # `read` retorna um objeto Tag, precisamos do seu `.value`
+
             result = driver.read(plc_tag_name)
             if result and result.value is not None:
-                # logging.debug(f"Tag '{plc_tag_name}' ({tag_key}) lida: {result.value} da máquina {machine_name}")
+
                 return result.value
             else:
                 logging.warning(f"Falha ao ler a tag PLC '{plc_tag_name}' ({tag_key}) na máquina {machine_name}. Valor retornado: {result}")
                 return None
         except Exception as e:
             logging.error(f"Erro ao ler a tag PLC '{plc_tag_name}' ({tag_key}) na máquina {machine_name}: {e}")
-            # Opcional: tentar fechar e reabrir a conexão se for um erro comum de comunicação
-            # try:
-            #     driver.close()
-            #     del self.connections[machine_name]
-            # except: pass
+
             return None
 
     def read_multiple_tags(self, machine_name: str, tag_keys: List[str]) -> Dict[str, Optional[Any]]:
@@ -97,10 +93,10 @@ class PLCConnector:
             plc_tag = machine_config.tag_mapping.get(key)
             if plc_tag:
                 plc_tags_to_read.append(plc_tag)
-                key_to_plc_tag_map[plc_tag] = key # Mapeia tag PLC de volta para a chave do config
+                key_to_plc_tag_map[plc_tag] = key
             else:
                 logging.warning(f"Tag key '{key}' não encontrada no mapeamento da máquina {machine_name} para leitura múltipla.")
-        
+
         if not plc_tags_to_read:
             return {key: None for key in tag_keys}
 
@@ -110,10 +106,10 @@ class PLCConnector:
             if not driver or not driver.connected:
                 logging.error(f"Não foi possível conectar ou reconectar à máquina {machine_name} para leitura múltipla.")
                 return {key: None for key in tag_keys}
-        
+
         results: Dict[str, Optional[Any]] = {key: None for key in tag_keys}
         try:
-            # `read_list` retorna uma lista de objetos Tag
+
             read_results = driver.read_list(plc_tags_to_read)
             for tag_result in read_results:
                 if tag_result and tag_result.value is not None:

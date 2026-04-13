@@ -22,21 +22,19 @@ class MachineConfigModel:
             raise ValueError(f"IP address is required for machine: {self.name}")
         if not self.tag_mapping.get("status") or not self.tag_mapping.get("total_strokes"):
              raise ValueError(f"Essential tags ('status' and 'total_strokes') are missing in tag_mapping for machine: {self.name}")
-        
-        # Define a velocidade máxima para cálculos (prioriza max_sp, depois current_speed_spm)
+
         self.speed_max_tag: Optional[str] = self.tag_mapping.get("max_sp") or self.tag_mapping.get("current_speed_spm")
         if not self.speed_max_tag:
             logging.warning(f"Tag for speed_max not found in tag_mapping for machine {self.name}. Performance calculations may be affected.")
 
-
 class ConfigManager:
     def __init__(self, configs_dir: str):
         self.configs_dir = configs_dir
-        self.machine_configs: Dict[str, MachineConfigModel] = {} # Armazena configs carregadas {machine_name: MachineConfigModel}
+        self.machine_configs: Dict[str, MachineConfigModel] = {}
         self.load_all_configs()
 
     def _get_config_path(self, machine_name: str) -> str:
-        # Assume que o nome do arquivo é o nome da máquina com .json
+
         return os.path.join(self.configs_dir, f"{machine_name}.json")
 
     def load_config(self, machine_name: str) -> Optional[MachineConfigModel]:
@@ -44,7 +42,7 @@ class ConfigManager:
         if not os.path.exists(config_path):
             logging.error(f"Arquivo de configuração não encontrado: {config_path}")
             return None
-        
+
         try:
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
@@ -79,7 +77,7 @@ class ConfigManager:
         if machine_name in self.machine_configs:
             return self.machine_configs[machine_name]
         else:
-            # Tenta carregar se não estiver em cache
+
             return self.load_config(machine_name)
 
     def get_all_machine_names(self) -> List[str]:
@@ -92,13 +90,12 @@ class ConfigManager:
         """Atualiza e salva a configuração de uma máquina."""
         config_path = self._get_config_path(machine_name)
         try:
-            # Valida os novos dados antes de salvar
-            MachineConfigModel(new_config_data) # Lança ValueError se inválido
-            
+
+            MachineConfigModel(new_config_data)
+
             with open(config_path, 'w') as f:
                 json.dump(new_config_data, f, indent=4)
-            
-            # Atualiza o cache interno
+
             self.machine_configs[machine_name] = MachineConfigModel(new_config_data)
             logging.info(f"Configuração atualizada e salva para: {machine_name}")
             return True

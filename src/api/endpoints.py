@@ -3,16 +3,13 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import json
 
-from .models import MachineDataDB, MachineDataRaw, EfficiencyMetrics, PlcConfig, MachineConfig # Importa os modelos Pydantic
+from .models import MachineDataDB, MachineDataRaw, EfficiencyMetrics, PlcConfig, MachineConfig
 from src.database import Database
 from src.calculations import EfficiencyCalculator
-from src.plc_connector import PLCConnector # Necessário para simular coleta ou para uma API de "trigger"
+from src.plc_connector import PLCConnector
 
 router = APIRouter()
 
-# --- Dependências ---
-# Instanciações globais (ou gerenciadas por um framework de DI se necessário)
-# Estas serão inicializadas pelo main.py e injetadas se necessário
 db = None
 calculator = None
 plc_connector = None
@@ -25,8 +22,6 @@ def set_dependencies(database, efficiency_calculator, connector, cfg_manager=Non
     calculator = efficiency_calculator
     plc_connector = connector
     config_manager = cfg_manager
-
-# --- Rotas de Configuração (Totalmente via Web) ---
 
 @router.get("/config/machines", summary="Lista configurações de todas as máquinas")
 def get_all_machines_config():
@@ -60,16 +55,12 @@ def update_global_standby_codes(data: Dict[str, List[int]]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar códigos: {e}")
 
-# --- Rotas de API ---
-
-
 @router.get("/data/{machine_name}", response_model=List[MachineDataDB], summary="Obtém dados brutos recentes de uma máquina")
 def get_recent_machine_data(machine_name: str, limit: int = 50):
     data = db.get_recent_data(machine_name, limit=limit)
     if not data:
         raise HTTPException(status_code=404, detail=f"Dados não encontrados para a máquina {machine_name} ou máquina não configurada.")
-    
-    # Converte dicionários para modelos Pydantic (se necessário para serialização formal)
+
     return [MachineDataDB(**item) for item in data]
 
 @router.get("/hourly/{machine_name}", summary="Obtém consolidados horários de uma máquina")

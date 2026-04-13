@@ -10,11 +10,10 @@ class TeamsNotifier:
         self.webhook_url = webhook_url
         if not self.webhook_url:
             logging.warning("TEAMS_WEBHOOK_URL não foi fornecido na inicialização. Notificações estarão desabilitadas.")
-            
+
         self.proxies = proxies or {}
         self.proxies = {k: v for k, v in self.proxies.items() if v}
 
-        # Adicionado aqui para que a API possa usar
         self.adaptive_card_template_str = """
         {
             "type": "AdaptiveCard",
@@ -147,15 +146,15 @@ class TeamsNotifier:
 
     def format_efficiency_value(self, value: float) -> str:
         if value is None: return "N/A"
-        return f"{value:.2%}" 
+        return f"{value:.2%}"
 
     def format_production_value(self, value: int) -> str:
         if value is None: return "N/A"
-        return f"{value:,}" 
+        return f"{value:,}"
 
     def format_standby_time(self, seconds: int) -> str:
         if seconds is None: return "N/A"
-        if seconds < 0: seconds = 0 
+        if seconds < 0: seconds = 0
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
@@ -173,13 +172,13 @@ class TeamsNotifier:
             return payload_dict
         except Exception as e:
             logging.error(f"Erro ao formatar o Adaptive Card para {machine_name}: {e}")
-            return {} 
+            return {}
 
     def send_message(self, card_payload: Dict[str, Any]) -> bool:
         if not self.webhook_url:
             logging.warning("TEAMS_WEBHOOK_URL não configurado. Notificações para o Teams estarão desabilitadas.")
             return False
-        
+
         if not card_payload:
             logging.warning("Payload do cartão vazio. Não foi possível enviar a mensagem.")
             return False
@@ -201,9 +200,9 @@ class TeamsNotifier:
                 self.webhook_url,
                 json=message_payload,
                 proxies=self.proxies,
-                timeout=10 
+                timeout=10
             )
-            response.raise_for_status() 
+            response.raise_for_status()
             logging.info("Mensagem enviada com sucesso para o Teams.")
             return True
         except requests.exceptions.RequestException as e:
