@@ -14,7 +14,6 @@ from src.config_manager import ConfigManager, MachineConfigModel
 from src.plc_connector import PLCConnector
 from src.database import Database
 from src.calculations import EfficiencyCalculator
-from src.api.endpoints import router as api_router # Importa o router da API
 from src.api.models import MachineDataRaw, EfficiencyMetrics # Importa modelos Pydantic para API
 
 # --- Configuração Inicial ---
@@ -46,7 +45,9 @@ app = FastAPI(
 )
 
 # Inclui as rotas da API definidas em endpoints.py
-app.include_router(api_router)
+from src.api import endpoints
+endpoints.set_dependencies(db, calculator, plc_connector)
+app.include_router(endpoints.router)
 
 # --- Funções Auxiliares para o Ciclo Principal ---
 
@@ -119,14 +120,7 @@ async def update_interval_times_in_db():
     # Para um sistema robusto, seria melhor ter uma tabela de "last_processed_timestamp" por máquina.
     
     try:
-        # Busca todos os registros brutos recentes que ainda não tiveram seus intervalos calculados
-        # Uma forma de fazer isso é buscar registros com interval_run_time_seconds = 0 e machine_name
-        # Ou buscar registros de um período recente (ex: últimos 5 minutos)
-        
-        # Vamos buscar todos os registros de todas as máquinas do último PROCESSING_INTERVAL_SECONDS
-        # Isso pode ser caro se houver muitos dados. Uma otimização é buscar apenas os não processados.
-        
-        # Opção 1: Buscar dados recentes e recalcular
+
         end_time_processing = datetime.now(timezone.utc)
         start_time_processing = end_time_processing - timedelta(seconds=PROCESSING_INTERVAL_SECONDS * 2) # Busca um pouco mais para garantir
         

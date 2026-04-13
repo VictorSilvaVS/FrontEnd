@@ -28,7 +28,7 @@
         "FLT_PRX7T_Discharge_Backup_Sensor": "CN1_BM208.Command.Discharge_Jam",
         "status": "IGN.Status"
     },
-    "line_number": "2",
+    "line_number": "23",
     "standby_codes": [
         5,
         6,

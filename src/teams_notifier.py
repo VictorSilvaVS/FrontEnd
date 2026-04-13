@@ -3,6 +3,7 @@ import json
 import os
 import logging
 from typing import Dict, Any, Optional
+from datetime import datetime, timezone # Importar datetime para o footer
 
 from dotenv import load_dotenv
 
@@ -10,23 +11,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class TeamsNotifier:
     def __init__(self):
-        # Carrega as variáveis do arquivo .env
         load_dotenv() 
         
         self.webhook_url: Optional[str] = os.getenv("TEAMS_WEBHOOK_URL")
         if not self.webhook_url:
             logging.error("TEAMS_WEBHOOK_URL não encontrado no arquivo .env. Notificações para o Teams estarão desabilitadas.")
             
-        # Configuração opcional de proxy
         self.proxies = {
             "http": os.getenv("HTTP_PROXY"),
             "https": os.getenv("HTTPS_PROXY"),
         }
-        # Remove proxies None para que requests não use None explicitamente
         self.proxies = {k: v for k, v in self.proxies.items() if v}
 
-        # O template do Adaptive Card em formato de string (JSON)
-        # Usamos f-strings com aspas triplas para facilitar a leitura do JSON
+        # Adicionado aqui para que a API possa usar
         self.adaptive_card_template_str = """
         {
             "type": "AdaptiveCard",
@@ -158,28 +155,21 @@ class TeamsNotifier:
         """
 
     def format_efficiency_value(self, value: float) -> str:
-        """Formata um valor de eficiência (entre 0 e 1) como string com '%'."""
         if value is None: return "N/A"
-        return f"{value:.2%}" # Formata como porcentagem com 2 casas decimais
+        return f"{value:.2%}" 
 
     def format_production_value(self, value: int) -> str:
-        """Formata um valor de produção (ex: strokes) com separador de milhar."""
         if value is None: return "N/A"
-        return f"{value:,}" # Usa vírgula como separador de milhar
+        return f"{value:,}" 
 
     def format_standby_time(self, seconds: int) -> str:
-        """Formata tempo em segundos para HH:MM:SS."""
         if seconds is None: return "N/A"
-        if seconds < 0: seconds = 0 # Não mostra tempo negativo
+        if seconds < 0: seconds = 0 
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
 
     def build_card_payload(self, machine_name: str, efficiency: float, production: int, standby_seconds: int, footer: str = "") -> Dict[str, Any]:
-        """Constrói o payload JSON do Adaptive Card para o Teams."""
-        
-        # Tenta preencher o template com os dados.
-        # Usa .format() para substituir os placeholders.
         try:
             formatted_card_str = self.adaptive_card_template_str.format(
                 machine_name=machine_name,
@@ -188,24 +178,21 @@ class TeamsNotifier:
                 standby=self.format_standby_time(standby_seconds),
                 footer=footer
             )
-            # Converte a string JSON formatada de volta para um dicionário Python
             payload_dict = json.loads(formatted_card_str)
             return payload_dict
         except Exception as e:
             logging.error(f"Erro ao formatar o Adaptive Card para {machine_name}: {e}")
-            return {} # Retorna um dicionário vazio em caso de erro
+            return {} 
 
     def send_message(self, card_payload: Dict[str, Any]) -> bool:
-        """Envia o payload do cartão para o Webhook do Microsoft Teams."""
         if not self.webhook_url:
-            logging.warning("Webhook URL do Teams não configurado. Não foi possível enviar a mensagem.")
+            logging.warning("TEAMS_WEBHOOK_URL não configurado. Notificações para o Teams estarão desabilitadas.")
             return False
         
         if not card_payload:
             logging.warning("Payload do cartão vazio. Não foi possível enviar a mensagem.")
             return False
 
-        # O Teams espera um payload com uma chave "content" que contém o Adaptive Card.
         message_payload = {
             "type": "message",
             "attachments": [
@@ -223,14 +210,13 @@ class TeamsNotifier:
                 self.webhook_url,
                 json=message_payload,
                 proxies=self.proxies,
-                timeout=10 # Define um timeout para a requisição
+                timeout=10 
             )
-            response.raise_for_status() # Lança uma exceção para códigos de erro HTTP (4xx ou 5xx)
+            response.raise_for_status() 
             logging.info("Mensagem enviada com sucesso para o Teams.")
             return True
         except requests.exceptions.RequestException as e:
             logging.error(f"Erro ao enviar mensagem para o Teams: {e}")
-            # Tenta logar o corpo da resposta se disponível e útil
             if hasattr(e, 'response') and e.response is not None:
                 logging.error(f"Resposta do Teams (status {e.response.status_code}): {e.response.text}")
             return False

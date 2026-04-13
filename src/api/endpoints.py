@@ -12,9 +12,17 @@ router = APIRouter()
 
 # --- Dependências ---
 # Instanciações globais (ou gerenciadas por um framework de DI se necessário)
-db = Database()
-calculator = EfficiencyCalculator()
-plc_connector = PLCConnector() # Para gerenciar conexões de forma mais robusta
+# Estas serão inicializadas pelo main.py e injetadas se necessário
+db = None
+calculator = None
+plc_connector = None # Para gerenciar conexões de forma mais robusta
+
+def set_dependencies(database, efficiency_calculator, connector):
+    """Injeta as dependências necessárias."""
+    global db, calculator, plc_connector
+    db = database
+    calculator = efficiency_calculator
+    plc_connector = connector
 
 # Simula a leitura de configurações de PLC e Standby para a API
 def get_plc_config():
