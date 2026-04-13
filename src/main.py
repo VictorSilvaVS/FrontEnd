@@ -27,6 +27,7 @@ except ImportError:
 from fastapi import FastAPI, HTTPException, Depends, Query, APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 # Importa componentes locais
 from src.config_manager import ConfigManager, MachineConfigModel
@@ -36,32 +37,61 @@ from src.calculations import EfficiencyCalculator
 from src.api.models import MachineDataRaw, EfficiencyMetrics
 from src.teams_notifier import TeamsNotifier
 
-# --- Configuração de Pastas ---
-LOGS_DIR = "logs"
+# --- Configurações Ambientais (Alto Nível de Abstração) ---
+# Forçando carregamento do arquivo .env. Fallbacks removidos.
+load_dotenv()
+
+# Uso de os.environ garantirá que se a variável faltar no .env,
+# a aplicação irá quebrar no boot (Fail-Fast), padrão ouro em Engenharia de Software.
+LOG_LEVEL = os.environ["LOG_LEVEL"].upper()
+LOGS_DIR = os.environ["LOGS_DIR"]
+BR_TZ = pytz.timezone(os.environ["TIMEZONE"])
+
+CONFIGS_MACHINES_DIR = os.environ["CONFIGS_MACHINES_DIR"]
+DB_PATH = os.environ["DB_PATH"]
+PLC_CONFIG_FILE = os.environ["PLC_CONFIG_FILE"]
+STANDBY_CODES_FILE = os.environ["STANDBY_CODES_FILE"]
+
+COLLECTION_INTERVAL_SECONDS = int(os.environ["COLLECTION_INTERVAL_SECONDS"])
+PROCESSING_INTERVAL_SECONDS = int(os.environ["PROCESSING_INTERVAL_SECONDS"])
+REPORTING_INTERVAL_SECONDS = int(os.environ["REPORTING_INTERVAL_SECONDS"])
+
+SERVER_HOST = os.environ["SERVER_HOST"]
+SERVER_PORT = int(os.environ["SERVER_PORT"])
+
+TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL")
+HTTP_PROXY = os.environ.get("HTTP_PROXY")
+HTTPS_PROXY = os.environ.get("HTTPS_PROXY")
+
+# --- Configuração de Pastas Base ---
 os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(CONFIGS_MACHINES_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-# --- Timezone Brasil ---
-BR_TZ = pytz.timezone('America/Sao_Paulo')
-
-# --- Configuração de Logging ---
+# --- Logging Profissional ---
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
 log_file = os.path.join(LOGS_DIR, "machine_monitor.log")
+
 file_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5)
 file_handler.setFormatter(log_formatter)
+
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(log_formatter)
 
-logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
-logger = logging.getLogger("Main")
+numeric_level = getattr(logging, LOG_LEVEL, logging.INFO)
+logging.basicConfig(level=numeric_level, handlers=[file_handler, console_handler])
+logger = logging.getLogger("SystemCore")
 
-# --- Instanciação dos Componentes ---
-config_manager = ConfigManager(configs_dir="configs/machines")
-db = Database(db_path="database/production_data.db", config_manager=config_manager)
+# --- Injeção de Dependências & App State ---
+config_manager = ConfigManager(configs_dir=CONFIGS_MACHINES_DIR)
+db = Database(db_path=DB_PATH, config_manager=config_manager)
 plc_connector = PLCConnector(config_manager=config_manager)
-calculator = EfficiencyCalculator(db_path="database/production_data.db", config_manager=config_manager)
-teams_notifier = TeamsNotifier()
+calculator = EfficiencyCalculator(db_path=DB_PATH, config_manager=config_manager)
+teams_proxies = {"http": HTTP_PROXY, "https": HTTPS_PROXY} if HTTP_PROXY or HTTPS_PROXY else None
+teams_notifier = TeamsNotifier(webhook_url=TEAMS_WEBHOOK_URL, proxies=teams_proxies)
 
-# --- Gerenciador de WebSockets (Tempo Real) ---
+
+# --- Gerenciador de WebSockets ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -77,28 +107,10 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Erro ao transmitir websocket: {e}")
 
 manager = ConnectionManager()
-
-# Caminhos de configuração
-CONFIGS_MACHINES_DIR = "configs/machines"
-DB_PATH = "database/production_data.db"
-PLC_CONFIG_FILE = "configs/plc_config.json" # Se você tiver um arquivo centralizado para PLCs
-STANDBY_CODES_FILE = "configs/standby_codes.json" # Se você tiver um arquivo centralizado para códigos
-
-# Intervalos de tempo (em segundos)
-COLLECTION_INTERVAL_SECONDS = 10 # Frequência de coleta de dados do PLC
-PROCESSING_INTERVAL_SECONDS = 60 # Frequência para calcular e atualizar tempos de intervalo no DB
-REPORTING_INTERVAL_SECONDS = 300 # Frequência para calcular métricas de OEE (ex: a cada 5 minutos)
-
-# --- Instanciação dos Componentes Principais ---
-# É importante instanciar ConfigManager primeiro, pois outros componentes dependem dele.
-config_manager = ConfigManager(configs_dir=CONFIGS_MACHINES_DIR)
-db = Database(db_path=DB_PATH)
-plc_connector = PLCConnector(config_manager=config_manager)
-calculator = EfficiencyCalculator(db_path=DB_PATH, config_manager=config_manager)
 
 # --- Criação da Aplicação FastAPI ---
 app = FastAPI(
@@ -394,48 +406,7 @@ async def read_root():
 # Este bloco é para rodar o script como um executável Python simples.
 # Em produção, você usará `uvicorn src.main:app --host ...` ou Gunicorn.
 if __name__ == "__main__":
-    # Para rodar este script diretamente: python src/main.py
-    # Você precisará criar as pastas `configs/machines/` e `database/` manualmente
-    # e adicionar pelo menos um arquivo JSON em `configs/machines/`.
-    
-    # Exemplo de criação manual de arquivos de config (para testes)
-    if not os.path.exists("configs/machines"):
-        os.makedirs("configs/machines")
-        logging.info("Criado: configs/machines/")
-    if not os.path.exists("database"):
-        os.makedirs("database")
-        logging.info("Criado: database/")
-
-    # Cria um arquivo de configuração de exemplo se não existir
-    example_machine_config_path = os.path.join("configs/machines", "example_machine.json")
-    if not os.path.exists(example_machine_config_path):
-        example_config_data = {
-            "name": "Example_Machine_01",
-            "ip_address": "192.168.1.100", # Mude para um IP válido ou de teste
-            "processor_slot": 1,
-            "tags_to_read": ["oPV_Shift_Stroke_Count", "Machine_Speed_SPM", "IGN.Status"],
-            "tag_mapping": {
-                "total_strokes": "oPV_Shift_Stroke_Count",
-                "current_speed_spm": "Machine_Speed_SPM",
-                "status": "IGN.Status",
-                "max_sp": "CN1_BM102.Command.High_Speed_SP" # Exemplo de tag para max_sp
-            },
-            "standby_codes": [5, 6, 9, 10, 84],
-            "line_number": "1"
-        }
-        with open(example_machine_config_path, 'w') as f:
-            json.dump(example_config_data, f, indent=4)
-        logging.info(f"Criado arquivo de configuração de exemplo: {example_machine_config_path}")
-
-    # Cria o arquivo de standby_codes.json se não existir
-    if not os.path.exists(STANDBY_CODES_FILE):
-        standby_data = {"standby_codes": [5, 6, 9, 10, 84]}
-        with open(STANDBY_CODES_FILE, 'w') as f:
-            json.dump(standby_data, f, indent=4)
-        logging.info(f"Criado arquivo de configuração de standby codes: {STANDBY_CODES_FILE}")
-
-    logging.info("Iniciando servidor Uvicorn (Acesso externo habilitado)...")
-    logging.info("Acesse a API local em: http://127.0.0.1:8000")
-    logging.info("Documentação interativa (Swagger UI): http://127.0.0.1:8000/docs")
-    # Bind em 0.0.0.0 permite que outros computadores na rede acessem este serviço
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info("Iniciando API Core de Monitoramento e Produção...")
+    logger.info(f"Host: {SERVER_HOST} | Porta: {SERVER_PORT}")
+    logger.info(f"Documentação Swagger da API iterativa disponível em http://{SERVER_HOST}:{SERVER_PORT}/docs")
+    uvicorn.run("src.main:app", host=SERVER_HOST, port=SERVER_PORT, reload=False)

@@ -10,12 +10,9 @@ from .config_manager import ConfigManager, MachineConfigModel
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class EfficiencyCalculator:
-    def __init__(self, db_path: str = "database/production_data.db", config_manager: ConfigManager = None):
+    def __init__(self, db_path: str, config_manager: ConfigManager):
         self.db_path = db_path
         self.config_manager = config_manager
-        if not self.config_manager:
-            self.config_manager = ConfigManager() # Instancia se não for passada
-            logging.warning("ConfigManager não foi passado para EfficiencyCalculator, instanciando um novo.")
 
     def get_standby_codes_for_machine(self, machine_name: str) -> List[int]:
         """Retorna os códigos de standby específicos para a máquina ou uma lista vazia."""

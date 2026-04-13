@@ -30,7 +30,7 @@ class MachineConfigModel:
 
 
 class ConfigManager:
-    def __init__(self, configs_dir: str = "configs/machines"):
+    def __init__(self, configs_dir: str):
         self.configs_dir = configs_dir
         self.machine_configs: Dict[str, MachineConfigModel] = {} # Armazena configs carregadas {machine_name: MachineConfigModel}
         self.load_all_configs()

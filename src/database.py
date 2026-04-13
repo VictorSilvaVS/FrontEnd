@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Database:
-    def __init__(self, db_path="database/production_data.db", config_manager=None):
+    def __init__(self, db_path: str, config_manager=None):
         self.db_path = db_path
         self.config_manager = config_manager
         self._create_tables()

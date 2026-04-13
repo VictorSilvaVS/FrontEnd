@@ -3,24 +3,15 @@ import json
 import os
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone # Importar datetime para o footer
-
-from dotenv import load_dotenv
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from datetime import datetime, timezone
 
 class TeamsNotifier:
-    def __init__(self):
-        load_dotenv() 
-        
-        self.webhook_url: Optional[str] = os.getenv("TEAMS_WEBHOOK_URL")
+    def __init__(self, webhook_url: Optional[str] = None, proxies: Optional[Dict[str, str]] = None):
+        self.webhook_url = webhook_url
         if not self.webhook_url:
-            logging.error("TEAMS_WEBHOOK_URL não encontrado no arquivo .env. Notificações para o Teams estarão desabilitadas.")
+            logging.warning("TEAMS_WEBHOOK_URL não foi fornecido na inicialização. Notificações estarão desabilitadas.")
             
-        self.proxies = {
-            "http": os.getenv("HTTP_PROXY"),
-            "https": os.getenv("HTTPS_PROXY"),
-        }
+        self.proxies = proxies or {}
         self.proxies = {k: v for k, v in self.proxies.items() if v}
 
         # Adicionado aqui para que a API possa usar

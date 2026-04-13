@@ -39,55 +39,29 @@ def update_machine_config(machine_name: str, config: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="Erro ao salvar configuração da máquina.")
     return {"message": f"Máquina {machine_name} configurada com sucesso."}
 
+import os
+
 @router.get("/config/standby_codes", summary="Lista códigos de standby globais")
 def get_global_standby_codes():
+    file_path = os.environ["STANDBY_CODES_FILE"]
     try:
-        with open("configs/standby_codes.json", 'r') as f:
+        with open(file_path, 'r') as f:
             return json.load(f)
     except:
         return {"standby_codes": []}
 
 @router.post("/config/standby_codes", summary="Atualiza códigos de standby globais")
 def update_global_standby_codes(data: Dict[str, List[int]]):
+    file_path = os.environ["STANDBY_CODES_FILE"]
     try:
-        with open("configs/standby_codes.json", 'w') as f:
+        with open(file_path, 'w') as f:
             json.dump(data, f, indent=4)
         return {"message": "Códigos de standby atualizados."}
-    except:
-        raise HTTPException(status_code=500, detail="Erro ao salvar códigos.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar códigos: {e}")
 
 # --- Rotas de API ---
 
-@router.get("/machines", summary="Lista todas as máquinas configuradas")
-def list_machines():
-    plc_configs = get_plc_config()
-    return {"machines": plc_configs.get("machines", [])}
-
-@router.put("/machines", summary="Atualiza a configuração de máquinas")
-def update_machines_config(new_plc_config: PlcConfig):
-    try:
-        with open("configs/plc_config.json", 'w') as f:
-            json.dump(new_plc_config.dict(), f, indent=4)
-        # Você pode querer reiniciar ou recarregar o conector do PLC aqui
-        # plc_connector.configs = new_plc_config.machines # Atualiza a instância do conector
-        return {"message": "Configuração de máquinas atualizada com sucesso."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar configs/plc_config.json: {e}")
-
-@router.get("/standby_codes", summary="Lista os códigos de standby")
-def get_standby_codes_endpoint():
-    return {"standby_codes": get_standby_codes()}
-
-@router.put("/standby_codes", summary="Atualiza os códigos de standby")
-def update_standby_codes(codes: Dict[str, List[int]]):
-    try:
-        with open("configs/standby_codes.json", 'w') as f:
-            json.dump(codes, f, indent=4)
-        # Atualiza os códigos no calculator se ele estiver carregado
-        # calculator.standby_codes = set(codes.get("standby_codes", [])) # Se o calculator tiver um método para isso
-        return {"message": "Códigos de standby atualizados com sucesso."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar configs/standby_codes.json: {e}")
 
 @router.get("/data/{machine_name}", response_model=List[MachineDataDB], summary="Obtém dados brutos recentes de uma máquina")
 def get_recent_machine_data(machine_name: str, limit: int = 50):
