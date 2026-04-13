@@ -1,0 +1,7 @@
+pycomm3
+sqlite3
+uvicorn
+fastapi
+pydantic
+pytest
+requests

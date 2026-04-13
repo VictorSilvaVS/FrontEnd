@@ -1,0 +1,39 @@
+{
+    "name": "Bodymaker 2-08",
+    "failure_codes": [
+        7007,
+        7006,
+        7004,
+        3500,
+        9015
+    ],
+    "ip_address": "10.81.72.19",
+    "processor_slot": 4,
+    "setpoint_tag_template": "CN1_BM208",
+    "setpoint_structure_key": "Command",
+    "tags_to_read": [
+        "PVo_Shift_Stroke_Count",
+        "CN1_BM208",
+        "Machine_Speed_SPM",
+        "IGN.Status"
+    ],
+    "tag_mapping": {
+        "total": "PVo_Shift_Stroke_Count",
+        "velocidade": "Machine_Speed_SPM",
+        "min_sp": "CN1_BM208.Command.Low_Speed_SP",
+        "max_sp": "CN1_BM208.Command.High_Speed_SP",
+        "CN1_BM208": "CN1_BM208",
+        "Line_Control_Discharge_High": "CN1_BM208.Command.Discharge_High",
+        "Line_Control_Low_Infeed": "CN1_BM208.Command.Infeed_Low",
+        "FLT_PRX7T_Discharge_Backup_Sensor": "CN1_BM208.Command.Discharge_Jam",
+        "status": "IGN.Status"
+    },
+    "line_number": "2",
+    "standby_codes": [
+        5,
+        6,
+        9,
+        10,
+        84
+    ]
+}

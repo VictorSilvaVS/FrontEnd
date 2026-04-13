@@ -1,0 +1,34 @@
+{
+    "name": "Bodymaker 1-01",
+    "ip_address": "10.81.71.12",
+    "processor_slot": 3,
+    "setpoint_tag_template": "CN1_BM101",
+    "setpoint_structure_key": "Command",
+    "tags_to_read": [
+        "oPV_Shift_Stroke_Count",
+        "CN1_BM101",
+        "Machine_Speed_SPM",
+        "IGN.Status"
+    ],
+    "tag_mapping": {
+        "total": "oPV_Shift_Stroke_Count",
+        "velocidade": "Machine_Speed_SPM",
+        "status": "IGN.Status",
+        "min_sp": "CN1_BM101.Command.Low_Speed_SP",
+        "max_sp": "CN1_BM101.Command.High_Speed_SP",
+        "cn1_bm101": "CN1_BM101",
+        "Line_Control_Discharge_High": "CN1_BM101.Command.Discharge_High",
+        "Line_Control_Low_Infeed": "CN1_BM101.Command.Infeed_Low",
+        "FLT_PRX7T_Discharge_Backup_Sensor": "CN1_BM101.Command.Discharge_Jam"
+    },
+    "standby_codes": [
+        5,
+        6,
+        9,
+        10,
+        84
+    ],
+    "line_number": "22",
+    "read_interval_seconds": 5,
+    "target_speed_spm": 300
+}
