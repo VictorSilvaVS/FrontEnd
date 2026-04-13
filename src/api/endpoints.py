@@ -15,30 +15,46 @@ router = APIRouter()
 # Estas serão inicializadas pelo main.py e injetadas se necessário
 db = None
 calculator = None
-plc_connector = None # Para gerenciar conexões de forma mais robusta
+plc_connector = None
+config_manager = None
 
-def set_dependencies(database, efficiency_calculator, connector):
+def set_dependencies(database, efficiency_calculator, connector, cfg_manager=None):
     """Injeta as dependências necessárias."""
-    global db, calculator, plc_connector
+    global db, calculator, plc_connector, config_manager
     db = database
     calculator = efficiency_calculator
     plc_connector = connector
+    config_manager = cfg_manager
 
-# Simula a leitura de configurações de PLC e Standby para a API
-def get_plc_config():
-    try:
-        with open("configs/plc_config.json", 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao carregar configs/plc_config.json: {e}")
+# --- Rotas de Configuração (Totalmente via Web) ---
 
-def get_standby_codes():
+@router.get("/config/machines", summary="Lista configurações de todas as máquinas")
+def get_all_machines_config():
+    return config_manager.get_all_configs()
+
+@router.post("/config/machine/{machine_name}", summary="Cria ou atualiza configuração de uma máquina")
+def update_machine_config(machine_name: str, config: Dict[str, Any]):
+    success = config_manager.update_machine_config(machine_name, config)
+    if not success:
+        raise HTTPException(status_code=400, detail="Erro ao salvar configuração da máquina.")
+    return {"message": f"Máquina {machine_name} configurada com sucesso."}
+
+@router.get("/config/standby_codes", summary="Lista códigos de standby globais")
+def get_global_standby_codes():
     try:
         with open("configs/standby_codes.json", 'r') as f:
-            config = json.load(f)
-            return config.get("standby_codes", [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao carregar configs/standby_codes.json: {e}")
+            return json.load(f)
+    except:
+        return {"standby_codes": []}
+
+@router.post("/config/standby_codes", summary="Atualiza códigos de standby globais")
+def update_global_standby_codes(data: Dict[str, List[int]]):
+    try:
+        with open("configs/standby_codes.json", 'w') as f:
+            json.dump(data, f, indent=4)
+        return {"message": "Códigos de standby atualizados."}
+    except:
+        raise HTTPException(status_code=500, detail="Erro ao salvar códigos.")
 
 # --- Rotas de API ---
 
@@ -82,15 +98,15 @@ def get_recent_machine_data(machine_name: str, limit: int = 50):
     # Converte dicionários para modelos Pydantic (se necessário para serialização formal)
     return [MachineDataDB(**item) for item in data]
 
-@router.get("/metrics/{machine_name}", response_model=EfficiencyMetrics, summary="Calcula e retorna métricas de eficiência para um período")
-def get_efficiency_metrics(
+@router.get("/hourly/{machine_name}", summary="Obtém consolidados horários de uma máquina")
+def get_hourly_metrics(
     machine_name: str,
-    start_time: str = Query(..., description="Tempo de início no formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)"),
-    end_time: str = Query(..., description="Tempo de fim no formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)")
+    start_time: str = Query(..., description="ISO 8601"),
+    end_time: str = Query(..., description="ISO 8601")
 ):
     try:
-        # Valida o formato das datas antes de chamar o calculator
-        datetime.fromisoformat(start_time)
-        datetime.fromisoformat(end_time)
-    except ValueError:
-        raise HTTPException(status_code=400)
+        st = datetime.fromisoformat(start_time)
+        et = datetime.fromisoformat(end_time)
+        return db.get_hourly_data(machine_name, st, et)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

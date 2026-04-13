@@ -1,23 +1,86 @@
 import uvicorn
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 import os
-from typing import Dict, List, Any
-
-from fastapi import FastAPI, HTTPException, Depends, Query, APIRouter
-from pydantic import BaseModel, Field
+import sys
 import json
+
+# --- Correção de Path para evitar "ModuleNotFoundError: No module named 'src'" ---
+# Isso permite rodar tanto como 'python src/main.py' quanto 'python -m src.main'
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Any, Optional
+from logging.handlers import RotatingFileHandler
+
+# Importa bibliotecas para agendamento e timezone (Precisa de pip install apscheduler pytz)
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    import pytz
+except ImportError:
+    logging.error("Bibliotecas 'apscheduler' ou 'pytz' não encontradas. Instale com: pip install apscheduler pytz")
+
+from fastapi import FastAPI, HTTPException, Depends, Query, APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 # Importa componentes locais
 from src.config_manager import ConfigManager, MachineConfigModel
 from src.plc_connector import PLCConnector
 from src.database import Database
 from src.calculations import EfficiencyCalculator
-from src.api.models import MachineDataRaw, EfficiencyMetrics # Importa modelos Pydantic para API
+from src.api.models import MachineDataRaw, EfficiencyMetrics
+from src.teams_notifier import TeamsNotifier
 
-# --- Configuração Inicial ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- Configuração de Pastas ---
+LOGS_DIR = "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# --- Timezone Brasil ---
+BR_TZ = pytz.timezone('America/Sao_Paulo')
+
+# --- Configuração de Logging ---
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
+log_file = os.path.join(LOGS_DIR, "machine_monitor.log")
+file_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5)
+file_handler.setFormatter(log_formatter)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+
+logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
+logger = logging.getLogger("Main")
+
+# --- Instanciação dos Componentes ---
+config_manager = ConfigManager(configs_dir="configs/machines")
+db = Database(db_path="database/production_data.db", config_manager=config_manager)
+plc_connector = PLCConnector(config_manager=config_manager)
+calculator = EfficiencyCalculator(db_path="database/production_data.db", config_manager=config_manager)
+teams_notifier = TeamsNotifier()
+
+# --- Gerenciador de WebSockets (Tempo Real) ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 # Caminhos de configuração
 CONFIGS_MACHINES_DIR = "configs/machines"
@@ -44,60 +107,129 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# --- Configuração de CORS (Essencial para integração com FrontEnd) ---
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Em produção, substitua pelo IP/DNS do seu FrontEnd
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Inclui as rotas da API definidas em endpoints.py
 from src.api import endpoints
-endpoints.set_dependencies(db, calculator, plc_connector)
+endpoints.set_dependencies(db, calculator, plc_connector, config_manager)
 app.include_router(endpoints.router)
 
 # --- Funções Auxiliares para o Ciclo Principal ---
 
 async def fetch_and_store_data():
-    """Coleta dados de todas as máquinas configuradas e armazena no banco de dados."""
-    logging.info("Iniciando coleta de dados do PLC...")
+    """Coleta dados, armazena e faz o broadcast via WebSocket."""
+    # logger.info("Iniciando coleta de dados do PLC...")
     all_machine_names = config_manager.get_all_machine_names()
     
-    if not all_machine_names:
-        logging.warning("Nenhuma máquina configurada encontrada. Aguardando configurações...")
-        return
+    if not all_machine_names: return
 
     data_to_insert = []
+    real_time_data = {}
+
     for machine_name in all_machine_names:
-        machine_config = config_manager.get_machine_config(machine_name)
-        if not machine_config:
-            logging.warning(f"Configuração não encontrada para {machine_name}. Pulando coleta.")
-            continue
-
-        # Define as tags que queremos ler de cada máquina
-        # Usaremos `status` e `total_strokes` que são essenciais para nossos cálculos
-        # E também `current_speed_spm` e `max_sp` para performance
         tags_to_read_keys = ["status", "total_strokes", "current_speed_spm", "max_sp"]
-        
-        # Adiciona outras tags mapeadas se necessário para log ou futuras análises
-        # tags_to_read_keys.extend([k for k in machine_config.tag_mapping if k not in tags_to_read_keys])
-
-        # Lê as tags
-        # Usamos `read_multiple_tags` para otimizar a comunicação com o PLC
         read_values = plc_connector.read_multiple_tags(machine_name, tags_to_read_keys)
 
-        if read_values and any(v is not None for v in read_values.values()): # Se alguma leitura foi bem sucedida
-            data_record: Dict[str, Any] = {"machine_name": machine_name}
-            
-            # Mapeia os valores lidos para as chaves genéricas do banco de dados
-            data_record["status"] = read_values.get("status")
-            data_record["total_strokes"] = read_values.get("total_strokes")
-            data_record["current_speed_spm"] = read_values.get("current_speed_spm")
-            data_record["max_sp"] = read_values.get("max_sp")
-            data_record["min_sp"] = read_values.get("min_sp") # Se você quiser logar isso também
-
-            # Adiciona dados que podem vir de outras tags mapeadas, se necessário
-            # Ex: data_record["line_control_discharge_high"] = read_values.get("Line_Control_Discharge_High")
-
+        if read_values and any(v is not None for v in read_values.values()):
+            data_record = {"machine_name": machine_name}
+            data_record.update({k: read_values.get(k) for k in tags_to_read_keys})
             data_to_insert.append(data_record)
-        else:
-            logging.warning(f"Nenhum dado válido lido para a máquina {machine_name} nesta coleta.")
+            real_time_data[machine_name] = data_record
 
     if data_to_insert:
         db.insert_data_batch(data_to_insert)
+        # Envia para todos os clientes conectados via WebSocket
+        await manager.broadcast(json.dumps({
+            "type": "real_time_update",
+            "timestamp": datetime.now(BR_TZ).isoformat(),
+            "data": real_time_data
+        }))
+
+async def run_hourly_rollup():
+    """Calcula o resumo da hora anterior e salva no banco (Rollup)."""
+    now = datetime.now(BR_TZ)
+    # Busca dados da hora cheia anterior
+    end_time = now.replace(minute=0, second=0, microsecond=0)
+    start_time = end_time - timedelta(hours=1)
+    
+    logger.info(f"Iniciando Rollup Horário: {start_time.hour}h até {end_time.hour}h")
+    
+    for machine_name in config_manager.get_all_machine_names():
+        try:
+            data_points = db.get_data_for_period(start_time, end_time, machine_name)
+            if data_points:
+                metrics = calculator.calculate_metrics_for_period(machine_name, data_points)
+                rollup = {
+                    "machine_name": machine_name,
+                    "hour_timestamp": start_time.isoformat(),
+                    "total_production": metrics.get("total_strokes", 0),
+                    "run_time_seconds": metrics.get("operating_time_seconds", 0),
+                    "standby_time_seconds": metrics.get("standby_downtime_seconds", 0),
+                    "availability": metrics.get("availability_ratio", 0.0),
+                    "performance": metrics.get("performance_ratio", 0.0),
+                    "oee": metrics.get("oee", 0.0)
+                }
+                db.insert_hourly_rollup(rollup)
+        except Exception as e:
+            logger.error(f"Erro no rollup horário para {machine_name}: {e}")
+
+async def send_shift_report():
+    """Envia 2 cards para o Teams no fechamento de turno (6h e 18h)."""
+    now = datetime.now(BR_TZ)
+    # Turno de 12 horas
+    start_time = now - timedelta(hours=12)
+    end_time = now
+    
+    logger.info(f"Fechamento de Turno detectado: {now.strftime('%H:%M')}. Enviando relatórios...")
+    
+    # Agrupa por linha (Linha 22 e Linha 23)
+    lines = {"22": [], "23": []}
+    
+    for machine_name in config_manager.get_all_machine_names():
+        config = config_manager.get_machine_config(machine_name)
+        line = config.line_number if config and config.line_number in ["22", "23"] else None
+        
+        if line:
+            data = db.get_data_for_period(start_time, end_time, machine_name)
+            if data:
+                metrics = calculator.calculate_metrics_for_period(machine_name, data)
+                lines[line].append({
+                    "name": machine_name,
+                    "oee": metrics.get("oee", 0.0),
+                    "prod": metrics.get("total_strokes", 0),
+                    "standby": metrics.get("standby_downtime_seconds", 0)
+                })
+
+    for line_id, machine_results in lines.items():
+        if not machine_results: continue
+        
+        # Cria um card consolidado para a linha
+        # (Neste exemplo, mandamos 1 card por máquina, conforme pedido '2 cards' se houver 2 máquinas ou 
+        # podemos consolidar. Vamos mandar 1 card por linha se for o esperado ou 1 por linha contendo as máquinas).
+        # O usuário pediu '2 card, 1 para cada linha'. Vamos criar um resumo por linha.
+        
+        avg_oee = sum(m['oee'] for m in machine_results) / len(machine_results)
+        total_prod = sum(m['prod'] for m in machine_results)
+        total_standby = sum(m['standby'] for m in machine_results)
+        
+        footer = f"Relatório de Turno ({start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')})"
+        
+        card = teams_notifier.build_card_payload(
+            machine_name=f"LINHA {line_id}",
+            efficiency=avg_oee,
+            production=total_prod,
+            standby_seconds=total_standby,
+            footer=footer
+        )
+        teams_notifier.send_message(card)
 
 async def update_interval_times_in_db():
     """
@@ -213,38 +345,45 @@ async def periodic_task(interval: int, coro):
         await asyncio.sleep(interval)
 
 # --- Eventos de Lifecycle da Aplicação FastAPI ---
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text() # Mantém conexão viva
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 @app.on_event("startup")
 async def startup_event():
     """Executado quando a aplicação FastAPI inicia."""
-    logging.info("Aplicação FastAPI iniciado.")
-    # Garante que o banco de dados esteja pronto
-    try:
-        db._create_tables() # Chama explicitamente para garantir que a tabela exista
-        logging.info("Banco de dados pronto.")
-    except Exception as e:
-        logging.critical(f"Falha crítica ao inicializar o banco de dados: {e}")
-        # Você pode querer parar a aplicação aqui se o DB for essencial
-        return
-
-    # Carrega todas as configurações de máquinas
+    logger.info("Aplicação FastAPI iniciada.")
+    db._create_tables()
     config_manager.load_all_configs()
-    logging.info(f"{len(config_manager.get_all_machine_names())} máquinas carregadas.")
-
-    # Abre as conexões iniciais com os PLCs
-    # O `plc_connector.connect()` será chamado quando a primeira leitura for necessária.
-    # Aqui podemos apenas garantir que o manager esteja pronto.
-
-    # Inicia o loop principal em uma task separada para não bloquear o loop de eventos do FastAPI
-    asyncio.create_task(main_loop())
-    logging.info("Loop principal de monitoramento iniciado em background.")
+    
+    # --- Configura o Agendador (APScheduler) ---
+    scheduler = AsyncIOScheduler(timezone=BR_TZ)
+    
+    # Coleta a cada 10s (já estava assim)
+    scheduler.add_job(fetch_and_store_data, 'interval', seconds=10)
+    
+    # Processamento de intervalos para o DB a cada 1m
+    scheduler.add_job(update_interval_times_in_db, 'interval', minutes=1)
+    
+    # Rollup Horário (todo início de hora)
+    scheduler.add_job(run_hourly_rollup, CronTrigger(minute=0, timezone=BR_TZ))
+    
+    # Relatório de Turno (6h e 18h)
+    scheduler.add_job(send_shift_report, CronTrigger(hour='6,18', minute=0, timezone=BR_TZ))
+    
+    scheduler.start()
+    logger.info("Agendador (Scheduler) iniciado com sucesso.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Executado quando a aplicação FastAPI é encerrada."""
-    logging.info("Aplicação FastAPI sendo encerrada.")
-    # Fecha todas as conexões com os PLCs
+    logger.info("Aplicação FastAPI sendo encerrada.")
     plc_connector.close_connections()
-    logging.info("Conexões com PLC fechadas.")
 
 # --- Endpoint Raiz (Opcional) ---
 @app.get("/", tags=["Root"])
@@ -295,7 +434,8 @@ if __name__ == "__main__":
             json.dump(standby_data, f, indent=4)
         logging.info(f"Criado arquivo de configuração de standby codes: {STANDBY_CODES_FILE}")
 
-    logging.info("Iniciando servidor Uvicorn (para rodar com 'python src/main.py')...")
-    logging.info("Acesse a API em: http://127.0.0.1:8000")
+    logging.info("Iniciando servidor Uvicorn (Acesso externo habilitado)...")
+    logging.info("Acesse a API local em: http://127.0.0.1:8000")
     logging.info("Documentação interativa (Swagger UI): http://127.0.0.1:8000/docs")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # Bind em 0.0.0.0 permite que outros computadores na rede acessem este serviço
+    uvicorn.run(app, host="0.0.0.0", port=8000)
